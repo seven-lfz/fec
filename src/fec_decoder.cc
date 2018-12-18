@@ -7,8 +7,8 @@
  */
 
 #include "fec_decoder.h"
-#include "byteorder.h"
-#include "rtp_parser.h"
+#include "common/byteorder.h"
+#include "common/rtp_parser.h"
 
 namespace fec {
 
