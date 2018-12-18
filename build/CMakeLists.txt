@@ -10,7 +10,7 @@ set(PROJECT_DIR ..)
 include_directories(${PROJECT_DIR}/src)
 include_directories(${PROJECT_DIR}/third_party/openfec)
 
-set(ENCODER_SRC ${PROJECT_DIR}/src/encoder_unittest.cc ${SOURCE_DIR}/src/fec_encoder.cc)
+set(ENCODER_SRC ${PROJECT_DIR}/src/encoder_unittest.cc ${PROJECT_DIR}/src/fec_encoder.cc)
 add_executable(FecEncoder ${ENCODER_SRC})
 target_link_libraries(FecEncoder openfec)
 
