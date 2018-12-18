@@ -7,7 +7,7 @@
  */
 
 #include "fec_packet.h"
-#include "byteorder.h"
+#include "common/byteorder.h"
 
 namespace fec {
 
@@ -28,8 +28,6 @@ FECPacket::FECPacket()
 	status_(kIdle),
 	sequence_num_(0),
 	start_seq_num_(0),
-	timestamp_(0),
-	frame_flag_(0),
 	source_num_(0),
 	repair_num_(0) {
 

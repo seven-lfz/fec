@@ -7,7 +7,7 @@
  */
 
 #include "fec_encoder.h"
-#include "byteorder.h"
+#include "common/byteorder.h"
 
 
 int DeliverPacket(const uint8_t* data, const uint32_t size) {

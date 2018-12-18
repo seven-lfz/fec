@@ -200,9 +200,7 @@ int FecDecoder::Decoded(const uint32_t start_idx, const uint32_t rows, const uin
 		// recover fec source packet
 		if (i < columns && rtp_pointer_[i]) {
 			uint16_t size = common::GetBE16(rtp_pointer_[i]);
-			fpkt->frame_flag_ = ((size >> 15) ? kFrameStart : 0) | ((size & 0x4000) ? kFrameEnd : 0);
-			fpkt->timestamp_ = common::GetTimeStamp((uint8_t*)rtp_pointer_[i] + sizeof(uint16_t), size);
-
+			
 			// real size
 			size = (size & 0x3fff) + sizeof(uint16_t);
 			memcpy(fpkt->Data() + kFecHeaderSize, rtp_pointer_[i], size);
