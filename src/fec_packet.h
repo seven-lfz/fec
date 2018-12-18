@@ -27,8 +27,6 @@
 #include <thread>
 #include "fec_common.h"
 
-using namespace std;
-
 namespace fec {
 
 enum { kIdle = 0, kUsed = (1 << 0), kDecoded = (1 << 1), kDelivered = (1 << 2) };
@@ -57,8 +55,10 @@ class FECPacket : public UDPPacket {
 	~FECPacket();
 
 	void Clear();
+	void AppendData(const uint8_t* data, const uint32_t size);
 	uint8_t* RtpData() const { return Data() + kFecHeaderSize + sizeof(uint16_t); }
-	uint32_t RtpSize() const { return Size() - kFecHeaderSize - sizeof(uint16_t); };
+	uint32_t RtpSize() const { return Size() - kFecHeaderSize - sizeof(uint16_t); }
+	int64_t AppendMs() const { return append_ms_; }
 	
   private:
   	inline bool IsSourcePacket() { return sequence_num_ < (start_seq_num_ + source_num_); }
@@ -67,10 +67,9 @@ class FECPacket : public UDPPacket {
 	uint32_t	status_;	
 	uint32_t	sequence_num_;
 	uint32_t	start_seq_num_;
-	uint32_t	timestamp_;
-	uint32_t	frame_flag_;
 	uint8_t		source_num_;
 	uint8_t		repair_num_;
+	int64_t		append_ms_;
 };
 
 }

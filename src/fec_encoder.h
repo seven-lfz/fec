@@ -19,10 +19,10 @@ class FecEncoder {
   public:
   	typedef std::function<int(const uint8_t*, const uint32_t)> PacketSender;
 	
-	FecEncoder(const uint32_t rows, const uint32_t columns, const uint32_t ssrc);
+	FecEncoder(PacketSender pkt_sender, const uint32_t rows, const uint32_t columns, const uint32_t ssrc);
 	~FecEncoder();
 
-	static FecEncoder* Create(const uint32_t rows, const uint32_t columns, const uint32_t ssrc);
+	static FecEncoder* Create(PacketSender pkt_sender, const uint32_t rows, const uint32_t columns, const uint32_t ssrc);
 	int OnPacketDelivered(const uint8_t* data, const uint32_t size);
 	int ModifyFecParameter(const uint32_t rows, const uint32_t columns);
 	
@@ -33,17 +33,14 @@ class FecEncoder {
 	void RefreshFecParameter();
 	inline bool IsPacketValid(const uint8_t* data, const uint32_t size);
 	inline bool TimeToDeliverRepair();
-	inline bool IsNewFrame(const uint8_t* data, const uint32_t size);
-	inline bool IsFrameEnd(const uint8_t* data, const uint32_t size);
 	inline void WriteFecHeader(uint8_t* data);
 
 	PacketSender	pkt_sender_;
 	const uint32_t 	ssrc_;
-	uint8_t		fec_row_num_;
-	uint8_t		fec_column_num_;
-  	uint32_t	start_seq_num_;
-	uint32_t	current_seq_num_;
-	uint32_t	last_frame_timestamp_;
+	uint8_t		fec_sources_;
+	uint8_t		fec_repairs_;
+  	uint32_t	start_seq_num_ = 0;
+	uint32_t	current_seq_num_ = 0;
 	
 	std::unique_ptr<of_session_t, FecSessionDeleter> session_;
 	std::vector<std::unique_ptr<UDPPacket>>	packet_list_;

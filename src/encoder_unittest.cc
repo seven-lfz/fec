@@ -1,47 +1,51 @@
 /*
  *
  *
- *  copyright by seven_lfz@2018
+ *  written by seven_lfz@2018
  *
  *
  */
 
 #include "fec_encoder.h"
+#include "byteorder.h"
+
 
 int DeliverPacket(const uint8_t* data, const uint32_t size) {
-	
-	
-	return 0;
+
+	return 0;	
 }
 
 int main(int argc, char* argv[]) {
+	char* pcap_file = argv[1];
 
-	char* filename = argv[1];
-
-	FILE* fp = fopen(filename, "rb");
+	
+	FILE* fp = fopen(pcap_file, "rb");
 	if (!fp) {
-		cout << "file " << filename << "is not exist" << endl;
+		std::cout << "open pcap file " << pcap_file << " failed" << std::endl;
 		return -1;
 	}
 
+	// pcap header
 	fseek(fp, 24, SEEK_CUR);
+
+	std::unique_ptr<uint8_t[]> buff(new uint8_t[kMaxMtuSize]);
+	auto f = std::bind(DeliverPacket, std::placeholders::_1, std::placeholders::_2);
+	std::unique_ptr<fec::FecEncoder> encoder(fec::FecEncoder::Create(f, 6, 2, 100000));
 	
-	uint8_t buff[kMaxMtuSize];
-	memset(buff, 0x0, sizeof(buff));
-
 	uint32_t len = 0;
-	while (16 != (len = fread(buff, 1, 16, fp))) {
-		uint32_t pkt_len = ((uint32_t*)buff)[3];
+	const uint32_t kPktHeaderLen = 42;
+	while (16 != (len = fread(buff.get(), 1, 16, fp))) {
+		uint32_t caplen = common::GetBE32(buff.get() + 12);
 
-		len = fread(buff, 1, pkt_len, fp);
-		if (len != pkt_len) {
-			cout << "read packet size " << len << " is not equal with length " << pkt_len << endl;
+		len = fread(buff.get(), 1, caplen, fp);
+		if (0 == len || kPktHeaderLen > len) {
+			std::cout << "read " << len << " bytes from file, length is invalid" << std::endl;
 			break;
 		}
 
-		uint8_t* rtp_data = buff + 42;
-		uint32_t rtp_size = pkt_len - 42;
-
-
+		encoder->OnPacketDelivered(buff.get() + kPktHeaderLen, len - kPktHeaderLen);
 	}
+
+	fclose(fp);
+	return 0;
 }

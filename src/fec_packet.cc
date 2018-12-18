@@ -43,5 +43,16 @@ void FECPacket::Clear() {
 	status_ = kIdle;
 }
 
+void FECPacket::AppendData(const uint8_t* data, const uint32_t size) {
+	status_ = kUsed;
+	sequence_num_ = common::GetBE32(data + 2);
+	start_seq_num_ = common::GetBE32(data + 10);
+	source_num_ = data[14];
+	repair_num_ = data[15];
+//	append_ms_ = 
+
+	SetData(data, size);
+}
+
 }
 

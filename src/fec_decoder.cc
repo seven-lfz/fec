@@ -12,20 +12,29 @@
 
 namespace fec {
 
-FecDecoder::FecDecoder(const uint32_t ssrc)
-	:ssrc_(ssrc),
-	next_decoded_idx_(0),
-	last_frame_idx_(0),
-	worker_(std::bind(&FecDecoder::Runnable, this)) {
-
+FecDecoder::FecDecoder()
+	: worker_(std::bind(&FecDecoder::Runnable, this)) {
+	
 }
 
 FecDecoder::~FecDecoder() {
 
 }
 
-FecDecoder* FecDecoder::Create(const uint32_t ssrc) {
-	return new FecDecoder(ssrc);
+FecDecoder* FecDecoder::Create() {
+	FecDecoder* inst = new FecDecoder();
+	if (0 == inst->Init())
+		return inst;
+
+	delete inst;
+	return nullptr;
+}
+
+int FecDecoder::Init() {
+	for (uint32_t i = 0; i < kFecPacketCount; i++)
+		packet_list_.emplace_back(new FECPacket());
+
+	return 0;
 }
 
 int FecDecoder::OnPacketReceived(const uint8_t* data, const uint32_t size) {
@@ -36,32 +45,26 @@ int FecDecoder::OnPacketReceived(const uint8_t* data, const uint32_t size) {
 	if (IsPacketNeeded(fec_hdr)) {
 		uint32_t idx = fec_hdr.sequence_num_ % packet_list_.size();
 		SaveFecPacket(idx, data, size);
-
-		if (NeedToSetEvent(data, size))
-			SetEvent();
 	}
 
 	return 0;
 }
 
-void FecDecoder::Runnable() {
-	if (0 == WaitEvent()) {
-		DecodedFecPacket();
-		DeliverFrame();
-	}
-}
-
 bool FecDecoder::IsPacketNeeded(FecHeader& fec_header) {
+	// this sequence packet have been decoded
+	if (fec_header.sequence_num_ < last_decoded_sequence_num_)
+		return false;
+	
 	// source packet is needed
 	if ((fec_header.start_sequence_num_ + fec_header.source_num_) > fec_header.sequence_num_)
 		return true;
 
-	// if have received packet number is equal with source number, other packet in this sequence is not needed
+	// if received packet number is equal with source number, other packet in this sequence is not needed
 	uint32_t stat_idx = fec_header.start_sequence_num_ % packet_list_.size();
 	uint32_t total_num = fec_header.source_num_ + fec_header.repair_num_;
 	uint32_t recv_count = 0;
 	for (uint32_t i = 0; i < total_num; i++) {
-		uint32_t idx = (stat_idx + i) & (packet_list_.size() - 1);
+		uint32_t idx = GetIndex(stat_idx + i);
 
 		FECPacket* fpkt = packet_list_[idx].get();
 		recv_count += ((fpkt->status_ & kUsed) && (fec_header.start_sequence_num_ == fpkt->start_seq_num_)); 
@@ -73,59 +76,42 @@ bool FecDecoder::IsPacketNeeded(FecHeader& fec_header) {
 void FecDecoder::SaveFecPacket(const uint32_t index, const uint8_t* data, const uint32_t size) {
 	FECPacket* fpkt = packet_list_[index].get();
 	if (kIdle != fpkt->status_) {
+		std::cout << "index " << index << " is not idle, sequence number " << fpkt->sequence_num_
+			      << " start sequence number " << fpkt->start_seq_num_ << " fec parameter [" << fpkt->source_num_
+			      << " | " << fpkt->repair_num_ << "]" << std::endl;
 
+		// TODO
 	}
 
-	fpkt->SetData(data, size);
+	fpkt->AppendData(data, size);
 }
 
-bool FecDecoder::NeedToSetEvent(const uint8_t* data, const uint32_t size) {
-	
-}
+void FecDecoder::Runnable() {
+	DecodedFecPacket();
 
-void FecDecoder::SetEvent() {
-
-}
-
-int FecDecoder::WaitEvent() {
-
+	if (0 == DeliverSourcePacket())
+		this_thread::sleep_for(chrono::milliseconds(20));
 }
 
 void FecDecoder::DecodedFecPacket() {
 	uint32_t loop = 0;
-
 	while (loop < packet_list_.size()) {
-		uint32_t pkt_num = GetNextSequence(next_decoded_idx_);
-		if (0 == pkt_num || pkt_num >= packet_list_.size())
-			break;
-
-		if (0 != DecodedSequence(next_decoded_idx_, pkt_num))
-			break;
-
-		loop += pkt_num;
-		next_decoded_idx_ = (next_decoded_idx_ + pkt_num) & (packet_list_.size() - 1);
-	}
-}
-
-uint32_t FecDecoder::GetNextSequence(const uint32_t start_idx) {
-	uint32_t loop = 0;
-
-	while (loop < packet_list_.size()) {
-		uint32_t idx = GetIndex(start_idx + (loop++));
+		uint32_t idx = GetIndex(next_decoded_idx_ + (loop++));
 		FECPacket* fpkt = packet_list_[idx].get();
-		if (!(fpkt->status_ & kUsed))
+		if (kIdle == fpkt->status_)
 			continue;
 
-		idx = fpkt->start_seq_num_ % packet_list_.size();
-		if (start_idx == idx)
-			return fpkt->source_num_ + fpkt->repair_num_;
+		uint32_t pkt_count = fpkt->source_num_ + fpkt->repair_num_;
+		if (next_decoded_idx_ == (fpkt->start_seq_num_ % packet_list_.size())) {
+			DecodedSequence(next_decoded_idx_, pkt_count);
+			break;
+		}
 
-		// at least one sequence packet have lossed, it will happend?
-		cout << "get next sequence: start index " << start_idx << " index " << idx << ", maybe loss one or more sequence"; 
-		return start_idx < idx ? (idx - start_idx) : ((idx + packet_list_.size()) - start_idx);
+		// at least one sequence packet have been lost OR have dirty packet 
+		std::cout << "between start index " << next_decoded_idx_ << " and end index " << idx
+				  << " may loss at least one sequence packet" << std::endl;
+		// TODO
 	}
-
-	return packet_list_.size();
 }
 
 int FecDecoder::DecodedSequence(const uint32_t start_idx, const uint32_t pkt_count) {
@@ -133,33 +119,44 @@ int FecDecoder::DecodedSequence(const uint32_t start_idx, const uint32_t pkt_cou
 	uint32_t recv_source_count = 0;
 	uint32_t source_num = 0;
 	uint32_t start_seq_num = 0;
+	int64_t last_append_ms = 0;
 	
 	for (uint32_t i = 0; i < pkt_count; i++) {
-		uint32_t idx = (start_idx + i) & (packet_list_.size() - 1);
-
+		uint32_t idx = GetIndex(start_idx + i);
 		FECPacket* fpkt = packet_list_[idx].get();
-		if (fpkt->status_ & kDecoded) {
-			cout << "start index " << start_idx << ", index " << idx << " have been decoded" << endl; 
-			break;
+		if (kIdle == fpkt->status_)
+			continue;
+
+		if (0 == recv_count) {
+			source_num = fpkt->source_num_;
+			start_seq_num = fpkt->start_seq_num_;
+		}
+	
+		if (start_seq_num != fpkt->start_seq_num_) {
+			std::cout << "decoded sequence: start index " << start_idx << " index " << idx << " start sequence number"
+					  << fpkt->start_seq_num_ << " is not equal with " << start_seq_num << std::endl;
+			continue;
 		}
 
-		if (fpkt->status_ & kUsed) {
-			if (0 == recv_count) {
-				source_num = fpkt->source_num_;
-				start_seq_num = fpkt->start_seq_num_;
-			}
-
-			recv_count += (start_seq_num == fpkt->start_seq_num_);
-			recv_source_count += (start_seq_num == fpkt->start_seq_num_ && i < source_num);
-		}
+		recv_count++;
+		recv_source_count += fpkt->IsSourcePacket();
+		last_append_ms = std::max(last_append_ms, fpkt->AppendMs());
 	}
 
+	// have received enough packet to decoded
 	if (recv_count && source_num <= recv_count) {
+		// if have all source packet, don't need to decoded
 		source_num == recv_source_count ? 0 : Decoded(start_idx, pkt_count, source_num);
 		ResetDecoder(start_idx, pkt_count, source_num);
+
+		// have received enough packet, other source packet or repair packet isn't in need
+		last_decoded_sequence_num_ = start_seq_num + pkt_count;
+		next_decoded_idx_ = GetIndex(start_idx + pkt_count);
 		return 0;
 	}
 
+	// broken sequence, don't wait any more time, reset and deliver
+	// TODO
 	return -1;
 }
 
@@ -234,96 +231,30 @@ void FecDecoder::ResetDecoder(const uint32_t start_idx, const uint32_t rows, con
 			fpkt->status_ = kUsed | kDecoded;
 		}
 	}
-
-	
 }
 
-void FecDecoder::DeliverFrame() {
+int FecDecoder::DeliverSourcePacket() {
 	uint32_t loop = 0;
-	
+	int result = -1;
 	while (loop < packet_list_.size()) {
-		// skip repair packet
-		FECPacket* fpkt = packet_list_[last_frame_idx_].get();
-		if ((fpkt->status_ & kUsed) && (!fpkt->IsSourcePacket())) {
-			loop++;
-			last_frame_idx_ = (last_frame_idx_ + 1) & (packet_list_.size() - 1);
-			fpkt->Clear();
-			continue;
-		}
-
-		uint32_t end_idx = GetNextFrame(last_frame_idx_);
-		if (packet_list_.size() <= end_idx) {
-			ResetBrokenFrame(last_frame_idx_);
-			break;
-		}
-
-		uint32_t pkt_num = DeliverPacket(last_frame_idx_, end_idx);
-		loop += pkt_num;
-		last_frame_idx_ = (last_frame_idx_ + pkt_num) & (packet_list_.size() - 1);
-	}
-}
-
-uint32_t FecDecoder::GetNextFrame(const uint32_t start_idx) {
-	uint32_t loop = 0;
-	uint32_t timestamp = 0;
-	
-	while (1) {
-		uint32_t end_idx = (start_idx + (loop++)) & (packet_list_.size() - 1);
-		FECPacket* fpkt = packet_list_[end_idx].get();
-		if (!(fpkt->status_ & kUsed))
+		FECPacket* fpkt = packet_list_[last_deliver_idx_].get();
+		if (kIdle == fpkt->status_)
 			break;
 
-		if (!fpkt->IsSourcePacket())
-			continue;
-
-		// find frame first packet
-		if (fpkt->frame_flag_ & kFrameStart)
-			timestamp = fpkt->timestamp_;
-
-		// find frame end packet
-		if (fpkt->frame_flag_ & kFrameEnd)
-			return end_idx;
-
-		// if there is a different timestamp between frame start end end packets
-		if (timestamp != fpkt->timestamp_) {
-			cout << "get next frame. start index " << start_idx << " timestamp is " << timestamp 
-				 << ", but index " << end_idx << " timestamp is " << fpkt->timestamp_ << endl;
-			break;
-		}
-		
-		if (packet_list_.size() <= loop)
-			break;
-	}
-
-	return packet_list_.size();
-}
-
-uint32_t FecDecoder::DeliverPacket(const uint32_t start_idx, const uint32_t end_idx) {
-	uint32_t pkt_num = 0;
-	
-	while (1) {
-		uint32_t idx = (start_idx + (pkt_num++)) & (packet_list_.size() - 1);
-		FECPacket* fpkt = packet_list_[idx].get();
-		if (!(fpkt->status_ & kUsed))
-			continue;
-
-		if (fpkt->IsSourcePacket())
+		loop++;
+		last_deliver_idx_ = GetIndex(last_deliver_idx_ + 1);
+		if (fpkt->IsSourcePacket())	 {
 			pkt_handler_(fpkt->RtpData(), fpkt->RtpSize());
-
-		// refresh packet status. if packet have decoded and deliver, release it
+			result = 0;
+		}	
+			
+	
 		fpkt->status_ |= kDelivered;
 		if (kReleased == fpkt->status_)
 			fpkt->Clear();
-			
-		if (idx == end_idx)
-			break;
 	}
 
-	return pkt_num;
-}
-
-void FecDecoder::ResetBrokenFrame(const uint32_t start_idx) {
-	
+	return result;
 }
 
 }

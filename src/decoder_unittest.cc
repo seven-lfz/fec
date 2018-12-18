@@ -30,25 +30,25 @@ int BindSocket(const char* ip, const uint16_t port) {
 	return fd;
 }
 
-int EncodedPacket(const uint8_t* data, const uint32_t size) {
+int HandleDecodedPacket(const uint8_t* data, const uint32_t size) {
+	static FILE* fp = nullptr;
 
+	if (!fp) {
+		fp = fopen("decoded_packet.dat", "wb");
+	}
+
+	fwrite(data, 1, size, fp);
 }
 
 int main(int argc, char* argv[]) {
 	char* ip = argv[1];
 	uint16_t port = atoi(argv[2]);
-	uint32_t ssrc = atoi(argv[3]);
 	
 	int fd = BindSocket(ip, port);
 	if (0 > fd)
 		return -1;
 	
-	std::unique_ptr<fec::FecDecoder> decoder(fec::FecDecoder::Create(ssrc));
-	if (!decoder) {
-		cout << "create fec decoder failed" << endl;
-		close(fd);
-		return -1;
-	}
+	std::unique_ptr<fec::FecDecoder> decoder(fec::FecDecoder::Create());
 	
 	std::unique_ptr<uint8_t[]> buff(new uint8_t[kMaxMtuSize]);
 	while (1) {
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
 		if (0 >= len)
 			break;
 
-		EncodedPacket(buff.get(), len);
+		decoder->OnPacketReceived(buff.get(), len);
 	}
 
 	close(fd);
